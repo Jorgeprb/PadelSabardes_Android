@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "PadelSabardes",
+    "slug": "PadelSabardes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.padel.padelsabardes",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Padel Sabardes necesita acceso a la cámara para que puedas actualizar tu foto de perfil.",
+        "NSPhotoLibraryUsageDescription": "Padel Sabardes necesita acceso a tu galería para que puedas seleccionar tu foto de perfil.",
+        "NSPhotoLibraryAddUsageDescription": "Padel Sabardes necesita permiso para guardar fotos en tu galería."
+      }
+    },
+    "android": {
+      "package": "com.padel.padelsabardes",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-camera",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Padel Sabardes accederá a tus fotos para que puedas actualizar tu foto de perfil.",
+          "cameraPermission": "Padel Sabardes usará la cámara para que puedas hacerte una foto de perfil."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a5193c00-3ce7-40f3-961f-d2548df2a1ca"
+      }
+    }
+  }
+}
