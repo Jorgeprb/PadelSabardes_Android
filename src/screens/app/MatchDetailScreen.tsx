@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView, Image, Modal } from 'react-native';
 import { db } from '../../services/firebaseConfig';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc, arrayUnion, arrayRemove, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, ThemeColors } from '../../context/ThemeContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +15,8 @@ export default function MatchDetailScreen({ route, navigation }: any) {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [kickTarget, setKickTarget] = useState<any>(null);
   const [participantsData, setParticipantsData] = useState<any[]>([]);
+  const [adminUserModalVisible, setAdminUserModalVisible] = useState(false);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const { user } = useAuth();
   const { primaryColor, colors } = useTheme();
 
@@ -125,11 +127,24 @@ export default function MatchDetailScreen({ route, navigation }: any) {
         return (
           <View style={styles.slotPlayer} key={'slot'+index}>
             <TouchableOpacity 
-                style={[styles.slotEmpty, { borderColor: primaryColor }]} onPress={() => { if(!isParticipant) handleJoin(); }} disabled={isParticipant}
+                style={[styles.slotEmpty, { borderColor: primaryColor }]} 
+                onPress={() => { 
+                  if (user?.role === 'admin') {
+                     if (allUsers.length === 0) {
+                        getDocs(collection(db, 'users')).then(snap => {
+                           setAllUsers(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+                        });
+                     }
+                     setAdminUserModalVisible(true);
+                  } else if(!isParticipant) {
+                     handleJoin();
+                  } 
+                }} 
+                disabled={isParticipant && user?.role !== 'admin'}
             >
                 <Ionicons name="add" size={28} color={primaryColor} />
             </TouchableOpacity>
-            {!isParticipant && <Text style={[styles.slotEmptyText, { color: primaryColor }]}>Pulsar</Text>}
+            {(!isParticipant || user?.role === 'admin') && <Text style={[styles.slotEmptyText, { color: primaryColor }]}>Pulsar</Text>}
           </View>
         );
     }
@@ -236,6 +251,41 @@ export default function MatchDetailScreen({ route, navigation }: any) {
                             <Text style={{color: '#fff', fontWeight: 'bold'}}>Expulsar</Text>
                         </TouchableOpacity>
                     </View>
+                </View>
+            </View>
+        </Modal>
+
+        <Modal visible={adminUserModalVisible} transparent animationType="slide">
+            <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end'}}>
+                <View style={{backgroundColor: colors.surface, padding: 24, borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '70%', elevation: 10, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: {width:0,height:-5}}}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <Text style={{fontSize: 20, fontWeight: 'bold', color: colors.text}}>Añadir Jugador</Text>
+                        <TouchableOpacity onPress={() => setAdminUserModalVisible(false)}>
+                            <Ionicons name="close" size={28} color={colors.textDim} />
+                        </TouchableOpacity>
+                    </View>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {allUsers.filter(u => !(match.listaParticipantes || []).includes(u.uid)).map(u => (
+                            <TouchableOpacity key={u.uid} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={async () => {
+                                try {
+                                    setAdminUserModalVisible(false);
+                                    await updateDoc(doc(db, 'matches', matchId), { listaParticipantes: arrayUnion(u.uid) });
+                                    const others = (match.listaParticipantes || []).filter((id: string) => id !== u.uid);
+                                    await sendCategorizedPushNotification(others, 'PÁDEL Sabardes', `El admin ha añadido a ${u.nombreApellidos} al partido del ${match.fecha}.`, 'joins');
+                                } catch(e) {}
+                            }}>
+                                {u.fotoURL ? (
+                                    <Image source={{uri: u.fotoURL}} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                                ) : (
+                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                        <Text style={{ fontWeight: 'bold', color: colors.textDim }}>{u.nombreApellidos?.charAt(0)}</Text>
+                                    </View>
+                                )}
+                                <Text style={{ fontSize: 16, color: colors.text, fontWeight: '500' }}>{u.nombreApellidos}</Text>
+                            </TouchableOpacity>
+                        ))}
+                        {allUsers.length === 0 && <ActivityIndicator color={primaryColor} style={{ marginTop: 40 }} />}
+                    </ScrollView>
                 </View>
             </View>
         </Modal>

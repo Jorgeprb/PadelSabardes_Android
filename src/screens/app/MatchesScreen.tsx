@@ -62,7 +62,12 @@ export default function MatchesScreen({ navigation }: any) {
         data.forEach(m => {
           if (!m.fecha || !m.hora) return;
           if (now - parseDateStr(m.fecha, m.hora) > 3600000) {
-            deleteDoc(doc(db, 'matches', m.id)).catch(() => {});
+            if (m.isTournament) {
+              m.isPast = true;
+              validData.push(m);
+            } else {
+              deleteDoc(doc(db, 'matches', m.id)).catch(() => {});
+            }
           } else validData.push(m);
         });
 
@@ -176,14 +181,16 @@ export default function MatchesScreen({ navigation }: any) {
 
         {/* Footer */}
         <View style={styles.cardFooter}>
-          {isFull ? (
+          {item.isPast ? (
+            <Text style={[styles.waitingText, { color: colors.textDim }]}>Partido finalizado sin resultado</Text>
+          ) : isFull ? (
             <Text style={[styles.confirmedText, { color: accentColor }]}>¡PARTIDO CONFIRMADO!</Text>
           ) : isParticipant ? (
             <Text style={styles.waitingText}>{freeSpots} plaza{freeSpots !== 1 ? 's' : ''} por cubrir</Text>
           ) : (
             <Text style={[styles.freeSpotsText, { color: accentColor }]}>{freeSpots} plaza{freeSpots !== 1 ? 's' : ''} libre{freeSpots !== 1 ? 's' : ''}</Text>
           )}
-          <Ionicons name={isTournament ? 'trophy' : 'chevron-forward-circle'} size={26} color={accentColor} />
+          <Ionicons name={isTournament ? 'trophy' : 'chevron-forward-circle'} size={26} color={item.isPast ? colors.textDim : accentColor} />
         </View>
       </TouchableOpacity>
     );
@@ -205,11 +212,15 @@ export default function MatchesScreen({ navigation }: any) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.calDaysScroll}>
             {weekDays.map((wd, i) => {
               const isSelected = selectedDateFilter === wd.format;
+              const hasMatch = matches.some(m => (m.fecha || '').substring(0, 5) === wd.format);
               return (
                 <TouchableOpacity key={i} style={styles.calDayCol} onPress={() => setSelectedDateFilter(wd.format)}>
                   <Text style={[styles.calDayName, isSelected && { color: primaryColor, fontWeight: '900' }]}>{wd.dayName}</Text>
                   <View style={[styles.calDayCircle, isSelected && { backgroundColor: '#111827' }]}>
                     <Text style={[styles.calDayNum, isSelected && { color: '#fff' }]}>{wd.dayNum}</Text>
+                    {hasMatch && (
+                      <View style={{ position: 'absolute', top: 0, right: 0, width: 8, height: 8, borderRadius: 4, backgroundColor: primaryColor, borderWidth: 1, borderColor: colors.background }} />
+                    )}
                   </View>
                   <Text style={[styles.calMonthName, isSelected && { color: primaryColor }]}>{wd.monthName}</Text>
                 </TouchableOpacity>
@@ -257,7 +268,7 @@ const getStyles = (colors: ThemeColors, primaryColor: string) => StyleSheet.crea
   headerTitle: { fontSize: 32, fontWeight: '900', color: colors.text, letterSpacing: 0.5 },
 
   // Card
-  card: { backgroundColor: colors.surface, borderRadius: 24, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4, borderWidth: 1, borderColor: colors.border },
+  card: { backgroundColor: colors.surface, borderRadius: 24, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
   cardTitle: { fontSize: 16, fontWeight: '900', color: colors.text, letterSpacing: 1, textTransform: 'uppercase' },
   cardDate: { fontSize: 13, color: colors.textDim, marginTop: 4, fontWeight: '500' },

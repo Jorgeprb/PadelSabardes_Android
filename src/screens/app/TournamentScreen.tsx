@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal,
-  ActivityIndicator, Alert, FlatList, Image, TextInput, Switch
+  ActivityIndicator, Alert, FlatList, Image, TextInput, Switch, Keyboard
 } from 'react-native';
 import { db } from '../../services/firebaseConfig';
 import {
   collection, doc, onSnapshot, getDoc, getDocs, addDoc,
-  updateDoc, deleteDoc, setDoc
+  updateDoc, deleteDoc, setDoc, query, where
 } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, ThemeColors } from '../../context/ThemeContext';
@@ -310,18 +310,29 @@ export default function TournamentScreen({ navigation }: any) {
 
     const standings = getStandings();
     const top8 = standings.slice(0, 8);
+
+    // Sanitize: Firestore rejects undefined; use null for missing seeds
+    const seed = (i: number) => top8[i] ?? null;
+
     const bracket = {
       quarterfinals: [
-        { id: 'qf1', teamA: top8[0], teamB: top8[7] }, { id: 'qf2', teamA: top8[1], teamB: top8[6] },
-        { id: 'qf3', teamA: top8[2], teamB: top8[5] }, { id: 'qf4', teamA: top8[3], teamB: top8[4] },
+        { id: 'qf1', teamA: seed(0), teamB: seed(7) },
+        { id: 'qf2', teamA: seed(1), teamB: seed(6) },
+        { id: 'qf3', teamA: seed(2), teamB: seed(5) },
+        { id: 'qf4', teamA: seed(3), teamB: seed(4) },
       ],
-      semifinals: [], final: []
+      semifinals: [],
+      final: {}
     };
     await setDoc(doc(db, 'tournament', TOURNAMENT_DOC), { bracket }, { merge: true });
   };
 
   const overrideResult = async () => {
-    if (user?.role !== 'admin' || !selectedMatch) return;
+    if (!selectedMatch) return;
+    const smId1 = selectedMatch.team1Id || selectedMatch.teamA?.id;
+    const smId2 = selectedMatch.team2Id || selectedMatch.teamB?.id;
+    const isImplicatedTeam = myTeam?.id && (smId1 === myTeam.id || smId2 === myTeam.id);
+    if (user?.role !== 'admin' && !isImplicatedTeam) return;
     
     // Process valid sets (only those where both scores are filled)
     const validSets = matchSets.filter(s => s.t1 !== '' && s.t2 !== '');
@@ -371,12 +382,22 @@ export default function TournamentScreen({ navigation }: any) {
          const winnerTeam = winnerId === (t1A?.id || newMatch?.team1Id) ? t1A : t2B;
          
          if (roundStr === 'quarterfinals' && winnerTeam) {
-             const sfIndex = Math.floor(index / 2);
-             const isTeamA = index % 2 === 0;
-             if (!bracketObj.semifinals) bracketObj.semifinals = [];
-             if (!bracketObj.semifinals[sfIndex]) bracketObj.semifinals[sfIndex] = {id: `sf${sfIndex+1}`};
-             if (isTeamA) bracketObj.semifinals[sfIndex].teamA = winnerTeam;
-             else bracketObj.semifinals[sfIndex].teamB = winnerTeam;
+             const allQfs = bracketObj.quarterfinals || [];
+             const finishedCount = allQfs.filter((qf: any) => qf.winnerId || (qf.id === newMatch.id && winnerId)).length;
+             
+             if (finishedCount === 4 && (!bracketObj.semifinals || bracketObj.semifinals.length === 0)) {
+                 const winners = allQfs.map((qf: any) => {
+                     const wId = qf.id === newMatch.id ? winnerId : qf.winnerId;
+                     const teamA = qf.teamA || teams.find(t => t.id === qf.team1Id);
+                     const teamB = qf.teamB || teams.find(t => t.id === qf.team2Id);
+                     return wId === (teamA?.id || qf.team1Id) ? teamA : teamB;
+                 });
+                 winners.sort(() => Math.random() - 0.5);
+                 bracketObj.semifinals = [
+                     { id: 'sf1', teamA: winners[0], teamB: winners[1] },
+                     { id: 'sf2', teamA: winners[2], teamB: winners[3] }
+                 ];
+             }
          } else if (roundStr === 'semifinals' && winnerTeam) {
              const isTeamA = index === 0;
              if (!bracketObj.final) bracketObj.final = {id: 'final'};
@@ -400,6 +421,14 @@ export default function TournamentScreen({ navigation }: any) {
         });
         await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { schedule: updatedSchedule });
       }
+
+      try {
+        const qMatches = query(collection(db, 'matches'), where('tournamentMatchId', '==', selectedMatch.id));
+        const snapMatches = await getDocs(qMatches);
+        snapMatches.forEach(docSnap => {
+          deleteDoc(doc(db, 'matches', docSnap.id)).catch(() => {});
+        });
+      } catch(e) {}
 
       setOverrideModalVisible(false);
       setSelectedMatch(null);
@@ -504,7 +533,7 @@ export default function TournamentScreen({ navigation }: any) {
 
   // Allows a participant to un-schedule a match so both teams can re-negotiate
   const resetScheduledMatch = async (match: any) => {
-    if (!myTeam) return;
+    if (!myTeam && user?.role !== 'admin') return;
     setConfirmModalConfig({
       visible: true,
       title: 'Cambiar Horario',
@@ -526,7 +555,90 @@ export default function TournamentScreen({ navigation }: any) {
             const m = rStr === 'final' ? { ...bracketObj.final } : { ...bracketObj[rStr][iIdx] };
             m.status = 'pending'; m.date = null;
             if (rStr === 'final') bracketObj.final = m; else bracketObj[rStr][iIdx] = m;
+            await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { bracket: bracketObj });
           }
+          // Delete associated match from global matches collection
+          try {
+            const qMatches = query(collection(db, 'matches'), where('tournamentMatchId', '==', match.id));
+            const snapMatches = await getDocs(qMatches);
+            snapMatches.forEach(docSnap => {
+              deleteDoc(doc(db, 'matches', docSnap.id)).catch(() => {});
+            });
+          } catch(e) {}
+        } catch (e: any) { Alert.alert('Error', e.message); }
+      }
+    });
+  };
+
+  // Admin: reset a played match back to pending
+  const resetPlayedMatch = async (match: any) => {
+    if (user?.role !== 'admin') return;
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Resetear Partido',
+      message: '¿Seguro que quieres anular el resultado de este partido? Volverá a estado "por disputar". Si tiene consecuencias en fases posteriores, se limpiarán.',
+      confirmText: 'Sí, resetear',
+      confirmColor: colors.danger,
+      onConfirm: async () => {
+        try {
+          const isBracket = match.phase === 'bracket';
+          if (!isBracket) {
+            // Phase 2 match
+            const schedule = [...(tournament.schedule || [])];
+            const idx = schedule.findIndex((m: any) => m.id === match.id);
+            if (idx === -1) return;
+            const resetted = { ...schedule[idx] };
+            delete resetted.status; delete resetted.sets; delete resetted.winnerId;
+            resetted.status = 'pending';
+            schedule[idx] = resetted;
+            await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { schedule });
+          } else {
+            const bracketObj = { ...tournament.bracket };
+            const [roundStr, index] = match.bracketPath;
+            let resetted;
+            if (roundStr === 'final') {
+              resetted = { ...bracketObj.final };
+            } else {
+              resetted = { ...bracketObj[roundStr][index] };
+            }
+            delete resetted.sets; delete resetted.winnerId;
+            resetted.status = 'pending';
+
+            if (roundStr === 'final') {
+              bracketObj.final = resetted;
+            } else {
+              bracketObj[roundStr][index] = resetted;
+            }
+
+            // Clean downstream: quarterfinals reset => clear semis+final; semifinals reset => clear final positions
+            if (roundStr === 'quarterfinals') {
+              bracketObj.semifinals = [];
+              bracketObj.final = {};
+            } else if (roundStr === 'semifinals') {
+              // Remove the winner's position from the final
+              if (bracketObj.final && bracketObj.final.id) {
+                const oldWinnerId = match.winnerId;
+                if (oldWinnerId) {
+                  if (bracketObj.final.teamA?.id === oldWinnerId) delete bracketObj.final.teamA;
+                  if (bracketObj.final.teamB?.id === oldWinnerId) delete bracketObj.final.teamB;
+                }
+                // If final has no teams left, reset it
+                if (!bracketObj.final.teamA && !bracketObj.final.teamB) {
+                  bracketObj.final = {};
+                }
+              }
+            }
+
+            await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { bracket: bracketObj });
+          }
+          // Delete associated match from global matches collection
+          try {
+            const qMatches = query(collection(db, 'matches'), where('tournamentMatchId', '==', match.id));
+            const snapMatches = await getDocs(qMatches);
+            snapMatches.forEach(docSnap => {
+              deleteDoc(doc(db, 'matches', docSnap.id)).catch(() => {});
+            });
+          } catch(e) {}
         } catch (e: any) { Alert.alert('Error', e.message); }
       }
     });
@@ -639,7 +751,7 @@ export default function TournamentScreen({ navigation }: any) {
          if (autoApproveTournament) {
            if (t1 && t2) {
               await addDoc(collection(db, 'matches'), {
-                fecha: matchDate,
+                fecha: matchDate.substring(0, 5),
                 hora: matchTime,
                 creadorId: 'admin',
                 creadorNombre: 'Torneo',
@@ -674,6 +786,65 @@ export default function TournamentScreen({ navigation }: any) {
       setMyProposedSlots([]);
       setMyVetoedSlots([]);
       setIncludePartner(false);
+    } catch (e: any) { Alert.alert('Error', e.message); }
+    finally { setSubmittingProposals(false); }
+  };
+
+  const forceAdminSchedule = async (forcedDateStr: string) => {
+    if (!selectedMatch || !user?.uid) return;
+    setSubmittingProposals(true);
+    try {
+      const isBracket = selectedMatch.phase === 'bracket';
+      const schedule = [...(tournament?.schedule || [])];
+      let match; let matchIdx = -1;
+
+      if (!isBracket) {
+        matchIdx = schedule.findIndex((m: any) => m.id === selectedMatch.id);
+        if (matchIdx === -1) return;
+        match = { ...schedule[matchIdx] };
+      } else {
+        const [rStr, iIdx] = selectedMatch.bracketPath;
+        if (rStr === 'final') match = { ...(tournament.bracket?.final || {}) };
+        else match = { ...tournament.bracket[rStr][iIdx] };
+      }
+
+      const [matchDate, matchTime] = forcedDateStr.split(' ');
+      match.status = 'scheduled';
+      match.date = forcedDateStr;
+
+      const t1 = match.teamA || teams.find(t => t.id === match.team1Id);
+      const t2 = match.teamB || teams.find(t => t.id === match.team2Id);
+
+      if (t1 && t2) {
+         await addDoc(collection(db, 'matches'), {
+           fecha: matchDate.substring(0, 5),
+           hora: matchTime,
+           creadorId: 'admin',
+           creadorNombre: 'Torneo',
+           listaParticipantes: [t1.player1Id, t1.player2Id, t2.player1Id, t2.player2Id].filter(id => !!id),
+           listaInvitados: [],
+           isTournament: true,
+           tournamentMatchId: match.id,
+           createdAt: new Date().toISOString()
+         });
+      }
+
+      if (!isBracket) {
+         schedule[matchIdx] = match;
+         await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { schedule });
+      } else {
+         const bracketObj = { ...tournament.bracket };
+         const [rStr, iIdx] = selectedMatch.bracketPath;
+         if (rStr === 'final') bracketObj.final = match;
+         else bracketObj[rStr][iIdx] = match;
+         await updateDoc(doc(db, 'tournament', TOURNAMENT_DOC), { bracket: bracketObj });
+      }
+
+      Alert.alert('Horario Fijado', `Se ha forzado el partido para el ${forcedDateStr}`);
+      setSlotActionVisible({ visible: false, dateStr: '' });
+      setCalendarModalVisible(false);
+      setMyProposedSlots([]);
+      setMyVetoedSlots([]);
     } catch (e: any) { Alert.alert('Error', e.message); }
     finally { setSubmittingProposals(false); }
   };
@@ -898,6 +1069,7 @@ export default function TournamentScreen({ navigation }: any) {
         }
         onPress={() => {
           setSelectedMatch(match);
+          const isMyMatch = myTeam?.id && (id1 === myTeam.id || id2 === myTeam.id);
           if (user?.role === 'admin') {
             if (!isPlayed) {
                setAdminMatchOptionsVisible(true);
@@ -906,22 +1078,27 @@ export default function TournamentScreen({ navigation }: any) {
                setOverrideModalVisible(true);
             }
           }
-          else if (!isPlayed) {
-            const pa = match.playerAvailability || {};
-            const teamProposed = new Set<string>();
-            const teamVetoed = new Set<string>();
-            if (myTeam?.player1Id && pa[myTeam.player1Id]) {
-                pa[myTeam.player1Id].proposed?.forEach((s:string) => teamProposed.add(s));
-                pa[myTeam.player1Id].vetoed?.forEach((s:string) => teamVetoed.add(s));
+          else if (isMyMatch) {
+            if (!isPlayed) {
+              const pa = match.playerAvailability || {};
+              const teamProposed = new Set<string>();
+              const teamVetoed = new Set<string>();
+              if (myTeam?.player1Id && pa[myTeam.player1Id]) {
+                  pa[myTeam.player1Id].proposed?.forEach((s:string) => teamProposed.add(s));
+                  pa[myTeam.player1Id].vetoed?.forEach((s:string) => teamVetoed.add(s));
+              }
+              if (myTeam?.player2Id && pa[myTeam.player2Id]) {
+                  pa[myTeam.player2Id].proposed?.forEach((s:string) => teamProposed.add(s));
+                  pa[myTeam.player2Id].vetoed?.forEach((s:string) => teamVetoed.add(s));
+              }
+              setMyProposedSlots(Array.from(teamProposed));
+              setMyVetoedSlots(Array.from(teamVetoed));
+              setCalendarModalVisible(true);
+            } else {
+              // User can correct result on played matches they're in
+              setMatchSets([{ t1: '', t2: '' }, { t1: '', t2: '' }, { t1: '', t2: '' }]);
+              setOverrideModalVisible(true);
             }
-            if (myTeam?.player2Id && pa[myTeam.player2Id]) {
-                pa[myTeam.player2Id].proposed?.forEach((s:string) => teamProposed.add(s));
-                pa[myTeam.player2Id].vetoed?.forEach((s:string) => teamVetoed.add(s));
-            }
-
-            setMyProposedSlots(Array.from(teamProposed));
-            setMyVetoedSlots(Array.from(teamVetoed));
-            setCalendarModalVisible(true);
           }
         }}
       >
@@ -935,8 +1112,8 @@ export default function TournamentScreen({ navigation }: any) {
               </View>
             </View>
             <View style={styles.proMatchNames}>
-              <Text style={[styles.proMatchNameText, isPlayed && isT1Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{t1Tag}{t1?.player1Name?.split(' ')[0] || match.team1Name || match.teamA?.name || '?'}</Text>
-              {t1?.player2Name && <Text style={[styles.proMatchNameText, isPlayed && isT1Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>     {t1?.player2Name?.split(' ')[0]}</Text>}
+              <Text style={[styles.proMatchNameText, isPlayed && isT1Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{!isPlayed && t1?.player1Id ? (match.playerAvailability?.[t1.player1Id]?.proposed?.length > 0 ? '✅ ' : '⏳ ') : ''}{t1Tag}{t1?.player1Name?.split(' ')[0] || match.team1Name || match.teamA?.name || '?'}</Text>
+              {t1?.player2Name && <Text style={[styles.proMatchNameText, isPlayed && isT1Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{!isPlayed && t1?.player2Id ? (match.playerAvailability?.[t1.player2Id]?.proposed?.length > 0 ? '   ✅ ' : '   ⏳ ') : '     '}{t1?.player2Name?.split(' ')[0]}</Text>}
             </View>
           </View>
           
@@ -950,8 +1127,8 @@ export default function TournamentScreen({ navigation }: any) {
               </View>
             </View>
             <View style={styles.proMatchNames}>
-              <Text style={[styles.proMatchNameText, isPlayed && isT2Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{t2Tag}{t2?.player1Name?.split(' ')[0] || match.team2Name || match.teamB?.name || '?'}</Text>
-              {t2?.player2Name && <Text style={[styles.proMatchNameText, isPlayed && isT2Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>     {t2?.player2Name?.split(' ')[0]}</Text>}
+              <Text style={[styles.proMatchNameText, isPlayed && isT2Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{!isPlayed && t2?.player1Id ? (match.playerAvailability?.[t2.player1Id]?.proposed?.length > 0 ? '✅ ' : '⏳ ') : ''}{t2Tag}{t2?.player1Name?.split(' ')[0] || match.team2Name || match.teamB?.name || '?'}</Text>
+              {t2?.player2Name && <Text style={[styles.proMatchNameText, isPlayed && isT2Winner && { color: primaryColor, fontWeight: '900' }]} numberOfLines={1}>{!isPlayed && t2?.player2Id ? (match.playerAvailability?.[t2.player2Id]?.proposed?.length > 0 ? '   ✅ ' : '   ⏳ ') : '     '}{t2?.player2Name?.split(' ')[0]}</Text>}
             </View>
           </View>
         </View>
@@ -972,6 +1149,11 @@ export default function TournamentScreen({ navigation }: any) {
                 {match.sets?.map((s:any, i:number) => <Text key={i} style={[styles.proMatchScoreText, parseInt(s.team2) > parseInt(s.team1) && styles.proMatchScoreWon]}>{s.team2}</Text>)}
                 {!match.sets && match.result && <Text style={styles.proMatchScoreText}>{match.result.split('-')[1]}</Text>}
               </View>
+              {user?.role === 'admin' && (
+                <TouchableOpacity style={{ marginTop: 6, padding: 4, borderRadius: 6, backgroundColor: colors.danger + '18' }} onPress={(e) => { e.stopPropagation?.(); resetPlayedMatch(match); }}>
+                  <Text style={{ color: colors.danger, fontSize: 9, fontWeight: '900', textAlign: 'center' }}>↩️ Resetear</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : match.status === 'scheduled' && myTeam?.id && (id1 === myTeam.id || id2 === myTeam.id) ? (
             <View style={styles.proMatchScoresArea}>
@@ -987,8 +1169,10 @@ export default function TournamentScreen({ navigation }: any) {
                let customText = 'por jugar';
                let pillStyle = {};
 
+               // Proposal indicators per team
+               const pa = match.playerAvailability || {};
+
                if (!isPlayed && myTeam?.id && (id1 === myTeam.id || id2 === myTeam.id)) {
-                  const pa = match.playerAvailability || {};
                   let propsCount = 0;
                   if (user?.uid && pa[user.uid]?.proposed) {
                       propsCount = pa[user.uid].proposed.length;
@@ -999,9 +1183,15 @@ export default function TournamentScreen({ navigation }: any) {
                   }
                }
                
+               const isFinal = match.phase === 'bracket' && match.bracketPath?.[0] === 'final';
                return (
                  <View style={styles.proMatchScoresArea}>
                     <Text style={[styles.proMatchPendingText, pillStyle]}>{customText}</Text>
+                    {user?.role === 'admin' && isFinal && (
+                       <TouchableOpacity style={{ marginTop: 8, padding: 6, borderRadius: 8, backgroundColor: primaryColor + '22', borderWidth: 1, borderColor: primaryColor }} onPress={(e) => { e.stopPropagation(); setSelectedMatch(match); setAdminMatchOptionsVisible(true); }}>
+                           <Text style={{ color: primaryColor, fontSize: 10, fontWeight: '900', textAlign: 'center' }}>Fijar Horario</Text>
+                       </TouchableOpacity>
+                    )}
                  </View>
                );
           })()}
@@ -1114,9 +1304,9 @@ export default function TournamentScreen({ navigation }: any) {
     return (
       <View>
         <Text style={[styles.phaseTitle, { fontSize: 26 }]}>Fase 3: Cuadro Final</Text>
-        {renderSection('Cuartos de Final', qf, '⚔️')}
-        {(allQFReady || sf.length > 0) && renderSection('Semifinales', sf, '🔥')}
         {(allSFReady || fi.length > 0) && renderSection('Gran Final', fi, '🏆')}
+        {(allQFReady || sf.length > 0) && renderSection('Semifinales', sf, '🔥')}
+        {renderSection('Cuartos de Final', qf, '⚔️')}
       </View>
     );
   };
@@ -1486,6 +1676,13 @@ export default function TournamentScreen({ navigation }: any) {
           <Text style={{ color: colors.textDim, marginBottom: 24 }}>¿Qué quieres marcar para este horario?</Text>
           
           <View style={{ gap: 12 }}>
+            {user?.role === 'admin' && (
+              <TouchableOpacity 
+                style={{ backgroundColor: primaryColor, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: primaryColor, alignItems: 'center', marginBottom: 8 }}
+                onPress={() => forceAdminSchedule(slotActionVisible.dateStr)}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Fijar Horario Oficial (Admin) 🏆</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity 
               style={{ backgroundColor: primaryColor + '22', paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: primaryColor, alignItems: 'center' }}
               onPress={() => {
@@ -1662,6 +1859,7 @@ export default function TournamentScreen({ navigation }: any) {
                         const newSets = [...matchSets];
                         newSets[idx].t1 = val;
                         setMatchSets(newSets);
+                        if (val.length > 0) Keyboard.dismiss();
                       }} 
                       placeholder="T1" 
                     />
@@ -1674,6 +1872,7 @@ export default function TournamentScreen({ navigation }: any) {
                         const newSets = [...matchSets];
                         newSets[idx].t2 = val;
                         setMatchSets(newSets);
+                        if (val.length > 0) Keyboard.dismiss();
                       }} 
                       placeholder="T2" 
                     />
@@ -1734,7 +1933,7 @@ export default function TournamentScreen({ navigation }: any) {
                   setCalendarModalVisible(true);
                 }}
               >
-                <Text style={styles.modalBtnText}>
+                <Text style={[styles.modalBtnText, { color: '#ffffff', fontWeight: 'bold' }]}>
                   {myTeam?.id && selectedMatch && (selectedMatch.team1Id === myTeam.id || selectedMatch.team2Id === myTeam.id) 
                     ? 'Proponer Horarios (Jugador)' 
                     : 'Ver Horarios y Vetos (Lectura)'}
@@ -1748,7 +1947,7 @@ export default function TournamentScreen({ navigation }: any) {
                   setOverrideModalVisible(true);
                 }}
               >
-                <Text style={styles.modalBtnText}>Escribir Resultado (Admin)</Text>
+                <Text style={[styles.modalBtnText, { color: '#ffffff', fontWeight: 'bold' }]}>Escribir Resultado (Admin)</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={{ marginTop: 20, padding: 10, alignSelf: 'center' }} onPress={() => setAdminMatchOptionsVisible(false)}>

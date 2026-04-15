@@ -293,6 +293,7 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
     const isSelected = isGroup ? selectedGroupIds.has(item.id) : selectedUserIds.has(item.id);
     return (
       <TouchableOpacity 
+        key={item.id}
         style={[styles.selectionCard, isSelected && !inviteAll && { borderColor: primaryColor, borderWidth: 2 }]} 
         onPress={() => toggleSelection(item.id, isGroup)}
       >
