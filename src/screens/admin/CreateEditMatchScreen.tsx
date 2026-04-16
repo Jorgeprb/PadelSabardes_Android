@@ -40,6 +40,11 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
   const [preParticipantes, setPreParticipantes] = useState<any[]>([null, null, null, null]);
   const [modalVisible, setModalVisible] = useState(false);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
+  const [existingMatchMeta, setExistingMatchMeta] = useState<{
+    creadorId?: string;
+    creadorNombre?: string;
+    fechaCreacion?: string;
+  } | null>(null);
 
   const isAdmin = user?.role === 'admin';
 
@@ -58,6 +63,19 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
             const mSnap = await getDoc(doc(db, 'matches', matchId));
             if (mSnap.exists()) {
                 const matchData = mSnap.data();
+                setExistingMatchMeta({
+                  creadorId: matchData.creadorId,
+                  creadorNombre: matchData.creadorNombre,
+                  fechaCreacion: matchData.fechaCreacion,
+                });
+
+                if (!isAdmin && matchData.creadorId !== user?.uid) {
+                    Alert.alert('Aviso', 'Solo el creador del partido o un administrador pueden editarlo.', [
+                      { text: 'OK', onPress: () => navigation.goBack() }
+                    ]);
+                    return;
+                }
+
                 const [d, mo] = matchData.fecha.split('/');
                 const [h, mi] = matchData.hora.split(':');
                 const parsedDate = new Date();
@@ -82,7 +100,7 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
       } catch (e) {}
     };
     initData();
-  }, [matchId]);
+  }, [isAdmin, matchId, navigation, user?.uid]);
 
 
 
@@ -99,6 +117,15 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
   };
 
   const handleSave = async () => {
+    if (!user) return;
+
+    if (matchId && !isAdmin && existingMatchMeta?.creadorId !== user.uid) {
+      Alert.alert('Aviso', 'Solo el creador del partido o un administrador pueden editarlo.', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
+      return;
+    }
+
     const finalFecha = formatDDMM(dateObj);
     const finalHora = formatHHMM(timeObj);
     
@@ -178,15 +205,18 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
         hora: finalHora,
         ubicacion: 'Sabardes',
         plazas: 4,
-        creadorId: user?.uid,
-        creadorNombre: user?.nombreApellidos,
+        creadorId: existingMatchMeta?.creadorId || user.uid,
+        creadorNombre: existingMatchMeta?.creadorNombre || user.nombreApellidos,
         listaParticipantes: fisicosParticipantes,
         listaInvitados: Array.from(finalInvitados),
         estado: 'abierto',
       };
 
       if (matchId) {
-         await updateDoc(doc(db, 'matches', matchId), payload);
+         await updateDoc(doc(db, 'matches', matchId), {
+           ...payload,
+           ...(existingMatchMeta?.fechaCreacion ? { fechaCreacion: existingMatchMeta.fechaCreacion } : {}),
+         });
       } else {
          await addDoc(collection(db, 'matches'), { ...payload, fechaCreacion: new Date().toISOString() });
       }
@@ -195,7 +225,7 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
       usersToNotify.delete(user?.uid || '');
       
       if (matchId) {
-        await sendCategorizedPushNotification(Array.from(usersToNotify), 'Cambios en tu partido', `El partido del ${finalFecha} a las ${finalHora} ha sido editado por el administrador.`, 'changes');
+        await sendCategorizedPushNotification(Array.from(usersToNotify), 'Cambios en tu partido', `El partido del ${finalFecha} a las ${finalHora} ha sido actualizado.`, 'changes');
       } else {
         await sendCategorizedPushNotification(Array.from(usersToNotify), '🎾 ¡Nuevo Partido Disponible!', `Has sido invitado a jugar el ${finalFecha} a las ${finalHora}.`, 'invitations');
       }

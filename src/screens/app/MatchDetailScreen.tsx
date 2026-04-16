@@ -18,7 +18,7 @@ export default function MatchDetailScreen({ route, navigation }: any) {
   const [adminUserModalVisible, setAdminUserModalVisible] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const { user } = useAuth();
-  const { primaryColor, colors, openMatchCreation } = useTheme();
+  const { primaryColor, colors } = useTheme();
 
   const styles = getStyles(colors);
 
@@ -83,10 +83,11 @@ export default function MatchDetailScreen({ route, navigation }: any) {
   };
 
   const executeDelete = async () => {
+      if (!(user?.role === 'admin' || match?.creadorId === user?.uid)) return;
       const parts = match?.listaParticipantes || [];
       const others = parts.filter((id: string) => id !== user?.uid);
       await deleteDoc(doc(db, 'matches', matchId));
-      await sendCategorizedPushNotification(others, 'Partido Cancelado', `El administrador ha cancelado el partido del ${match.fecha}.`, 'cancellations');
+      await sendCategorizedPushNotification(others, 'Partido Cancelado', `El partido del ${match.fecha} ha sido cancelado.`, 'cancellations');
       setDeleteModalVisible(false);
       navigation.goBack();
   };
@@ -94,6 +95,7 @@ export default function MatchDetailScreen({ route, navigation }: any) {
   if (loading || !match) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={primaryColor} /></View>;
 
   const isParticipant = match.listaParticipantes?.includes(user?.uid);
+  const canManageMatch = user?.role === 'admin' || match.creadorId === user?.uid;
   const max = match.plazas || 4;
   const half = Math.ceil(max / 2);
 
@@ -161,7 +163,7 @@ export default function MatchDetailScreen({ route, navigation }: any) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Ionicons name="arrow-back" size={24} color="#fff" />
                 </TouchableOpacity>
-                {(user?.role === 'admin' || openMatchCreation) && (
+                {canManageMatch && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                         <TouchableOpacity style={[styles.trashBtn, { backgroundColor: '#ffffff', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }]} onPress={() => navigation.navigate('CreateEditMatch', { matchId })}>
                             <Ionicons name="pencil" size={20} color={primaryColor} />

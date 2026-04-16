@@ -59,8 +59,10 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "a5193c00-3ce7-40f3-961f-d2548df2a1ca"
+        "projectId": "1547f2dc-532c-4f3e-9208-0edfd2adda91"
       }
-    }
+    },
+    "owner": "jorgebinarial"
+
   }
 }
