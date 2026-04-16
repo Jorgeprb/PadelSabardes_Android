@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'react-native';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db } from '../services/firebaseConfig';
 
 export type ThemeColors = {
   background: string;
@@ -90,17 +92,19 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
          const savedCal = await AsyncStorage.getItem('calendarView');
          if (savedCal !== null) setIsCalendarView(savedCal === 'true');
 
-         const savedAutoApprove = await AsyncStorage.getItem('autoApproveTournament');
-         if (savedAutoApprove !== null) setAutoApproveTournament(savedAutoApprove === 'true');
-
-         const savedOpen = await AsyncStorage.getItem('openMatchCreation');
-         if (savedOpen !== null) setOpenMatchCreation(savedOpen === 'true');
-
          const savedFont = await AsyncStorage.getItem('fontSize') as FontSize | null;
          if (savedFont) setFontSizeState(savedFont);
       } catch (e) {}
     };
     loadTheme();
+
+    const unsubscribe = onSnapshot(doc(db, 'config', 'settings'), (snapshot) => {
+      const data = snapshot.exists() ? snapshot.data() : {};
+      setAutoApproveTournament(typeof data.autoApproveTournament === 'boolean' ? data.autoApproveTournament : false);
+      setOpenMatchCreation(typeof data.openMatchCreation === 'boolean' ? data.openMatchCreation : false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const setPrimaryColor = async (color: string) => {
@@ -129,13 +133,21 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const toggleAutoApproveTournament = async () => {
     const newVal = !autoApproveTournament;
     setAutoApproveTournament(newVal);
-    try { await AsyncStorage.setItem('autoApproveTournament', newVal ? 'true' : 'false'); } catch (e) {}
+    try {
+      await setDoc(doc(db, 'config', 'settings'), { autoApproveTournament: newVal }, { merge: true });
+    } catch (e) {
+      setAutoApproveTournament(!newVal);
+    }
   };
 
   const toggleOpenMatchCreation = async () => {
     const newVal = !openMatchCreation;
     setOpenMatchCreation(newVal);
-    try { await AsyncStorage.setItem('openMatchCreation', newVal ? 'true' : 'false'); } catch (e) {}
+    try {
+      await setDoc(doc(db, 'config', 'settings'), { openMatchCreation: newVal }, { merge: true });
+    } catch (e) {
+      setOpenMatchCreation(!newVal);
+    }
   };
 
   const setFontSize = async (size: FontSize) => {
