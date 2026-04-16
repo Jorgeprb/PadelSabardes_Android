@@ -41,13 +41,18 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
   const [modalVisible, setModalVisible] = useState(false);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
 
+  const isAdmin = user?.role === 'admin';
+
   useEffect(() => {
     const initData = async () => {
       try {
-        const [uSnap, gSnap] = await Promise.all([ getDocs(collection(db, 'users')), getDocs(collection(db, 'groups')) ]);
+        const uSnap = await getDocs(collection(db, 'users'));
         const fetchedUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         setUsers(fetchedUsers);
-        setGroups(gSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        if (isAdmin) {
+          const gSnap = await getDocs(collection(db, 'groups'));
+          setGroups(gSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }
         
         if (matchId) {
             const mSnap = await getDoc(doc(db, 'matches', matchId));
@@ -371,9 +376,13 @@ export default function CreateEditMatchScreen({ route, navigation }: any) {
                 <Ionicons name={inviteAll ? 'checkmark-circle' : 'ellipse-outline'} size={28} color={inviteAll ? primaryColor : colors.border} />
             </TouchableOpacity>
 
-            <Text style={[styles.groupLabel, { marginTop: 16 }]}>Grupos Rápidos</Text>
-            {groups.length === 0 && <Text style={styles.emptyText}>No has creado grupos aún.</Text>}
-            {groups.map(g => renderSelectionItem(g, true))}
+            {isAdmin && (
+              <>
+                <Text style={[styles.groupLabel, { marginTop: 16 }]}>Grupos Rápidos</Text>
+                {groups.length === 0 && <Text style={styles.emptyText}>No has creado grupos aún.</Text>}
+                {groups.map(g => renderSelectionItem(g, true))}
+              </>
+            )}
             
             <Text style={[styles.groupLabel, { marginTop: 24 }]}>Individuales</Text>
             {users.map(u => renderSelectionItem(u, false))}

@@ -74,7 +74,7 @@ export default function MatchesScreen({ navigation }: any) {
         let filtered = validData;
         if (user?.role !== 'admin') {
           filtered = validData.filter(m =>
-            m.listaParticipantes?.includes(user?.uid) || m.listaInvitados?.includes(user?.uid)
+            m.listaParticipantes?.includes(user?.uid) || m.listaInvitados?.includes(user?.uid) || m.creadorId === user?.uid
           );
         }
 

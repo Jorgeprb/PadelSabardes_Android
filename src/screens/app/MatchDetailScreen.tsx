@@ -18,7 +18,7 @@ export default function MatchDetailScreen({ route, navigation }: any) {
   const [adminUserModalVisible, setAdminUserModalVisible] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const { user } = useAuth();
-  const { primaryColor, colors } = useTheme();
+  const { primaryColor, colors, openMatchCreation } = useTheme();
 
   const styles = getStyles(colors);
 
@@ -161,7 +161,7 @@ export default function MatchDetailScreen({ route, navigation }: any) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Ionicons name="arrow-back" size={24} color="#fff" />
                 </TouchableOpacity>
-                {user?.role === 'admin' && (
+                {(user?.role === 'admin' || openMatchCreation) && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                         <TouchableOpacity style={[styles.trashBtn, { backgroundColor: '#ffffff', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }]} onPress={() => navigation.navigate('CreateEditMatch', { matchId })}>
                             <Ionicons name="pencil" size={20} color={primaryColor} />
