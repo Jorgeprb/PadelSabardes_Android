@@ -12,8 +12,8 @@ import { useTheme, ThemeColors } from '../../context/ThemeContext';
 import { useTranslation } from '../../context/LanguageContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
+import { registerPushTokenForUser } from '../../services/PushService';
 
 // Extended color palette — cubriendo todo el espectro
 const COLOR_PALETTE = [
@@ -209,9 +209,21 @@ export default function SettingsScreen() {
   };
 
   const retryNotificationPermissions = async () => {
-    const { status } = await Notifications.requestPermissionsAsync();
-    Alert.alert(status === 'granted' ? '✅ Permisos concedidos' : '❌ Permisos denegados',
-      status === 'granted' ? 'Las notificaciones están activadas.' : 'Ve a Ajustes del sistema para activarlas manualmente.');
+    if (!user?.uid) return;
+
+    try {
+      const result = await registerPushTokenForUser(user.uid, user.pushToken);
+
+      Alert.alert(
+        result.finalStatus === 'granted' ? '✅ Permisos concedidos' : '❌ Permisos denegados',
+        result.finalStatus === 'granted'
+          ? 'Las notificaciones están activadas y el dispositivo quedó registrado correctamente.'
+          : 'Ve a Ajustes del sistema para activarlas manualmente.'
+      );
+    } catch (e) {
+      console.log('[PushToken] Error retrying permissions:', e);
+      Alert.alert(t('error'), 'No se pudieron reactivar las notificaciones.');
+    }
   };
 
   const showImageSourcePicker = () => {
