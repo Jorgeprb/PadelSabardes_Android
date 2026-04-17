@@ -103,6 +103,23 @@ const translations = {
     delete_user_confirm: '¿Borrar Usuario?',
     delete_user_msg: 'Se eliminará permanentemente de todos los partidos, equipos y la base de datos.',
     delete_all: 'Borrar Todo',
+    weather_forecast: 'Pronóstico del tiempo',
+    weather_hourly: 'Tiempo por horas',
+    weather_loading: 'Cargando tiempo...',
+    weather_error: 'No se pudo cargar el tiempo',
+    weather_unavailable: 'No hay datos meteorológicos disponibles',
+    weather_selected_hour: 'Hora seleccionada',
+    weather_match_hour: 'Hora del partido',
+    weather_clear: 'Despejado',
+    weather_mostly_clear: 'Poco nuboso',
+    weather_partly_cloudy: 'Parcialmente nuboso',
+    weather_cloudy: 'Nublado',
+    weather_fog: 'Niebla',
+    weather_drizzle: 'Llovizna',
+    weather_rain: 'Lluvia',
+    weather_showers: 'Chubascos',
+    weather_snow: 'Nieve',
+    weather_storm: 'Tormenta',
   },
   gl: {
     // Navigation
@@ -203,6 +220,23 @@ const translations = {
     delete_user_confirm: '¿Borrar Usuario?',
     delete_user_msg: 'Eliminarase permanentemente de todos os partidos, equipos e a base de datos.',
     delete_all: 'Borrar Todo',
+    weather_forecast: 'Pronóstico do tempo',
+    weather_hourly: 'Tempo por horas',
+    weather_loading: 'Cargando o tempo...',
+    weather_error: 'Non se puido cargar o tempo',
+    weather_unavailable: 'Non hai datos meteorolóxicos dispoñibles',
+    weather_selected_hour: 'Hora seleccionada',
+    weather_match_hour: 'Hora do partido',
+    weather_clear: 'Despexado',
+    weather_mostly_clear: 'Pouco nubrado',
+    weather_partly_cloudy: 'Parcialmente nubrado',
+    weather_cloudy: 'Anubrado',
+    weather_fog: 'Néboa',
+    weather_drizzle: 'Orballo',
+    weather_rain: 'Chuvia',
+    weather_showers: 'Chuvascos',
+    weather_snow: 'Neve',
+    weather_storm: 'Treboada',
   }
 };
 
@@ -215,13 +249,13 @@ type LanguageContextType = {
 };
 
 const LanguageContext = createContext<LanguageContextType>({
-  language: 'es',
+  language: 'gl',
   setLanguage: () => {},
   t: (key) => key,
 });
 
 export const LanguageProvider = ({ children }: { children: React.ReactNode }) => {
-  const [language, setLanguageState] = useState<Language>('es');
+  const [language, setLanguageState] = useState<Language>('gl');
 
   useEffect(() => {
     AsyncStorage.getItem('appLanguage').then(saved => {
